@@ -2,6 +2,7 @@
     <requirements>
         <requirement type="package" version="1.9">samtools</requirement>
         <requirement type="package" version="2.6.0b">star</requirement>
+        <requirement type="package" version="0.2.6">bamcount</requirement>
         <!-- <requirement type="package" version="5.4.0">snakemake-minimal</requirement> -->
     </requirements>
         <!-- /bin/bash -x monorail.slim.sh ../ath10 4 10 ../ath10/gtf/exons.bed ./tmp2 ../fastqs/SRR8505407_1_100.fastq.gz ../fastqs/SRR8505407_2_100.fastq.gz -->

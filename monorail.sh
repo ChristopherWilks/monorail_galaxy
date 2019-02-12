@@ -17,7 +17,6 @@ reads1=$6
 #e.g. tmp/SRR8505407_SRP182756_ath10_sra_2.fastq.gz, just leave off if not paired
 reads2=$7
 
-#cd ${tmp}
 #align
 STAR --runMode alignReads --runThreadN $threads --genomeDir ${ref} --readFilesIn $reads1 $reads2 --readFilesCommand zcat --twopassMode None --outReadsUnmapped Fastx --outMultimapperOrder Random --outSAMreadID Number --readFilesType Fastx --outTmpDir ./star_tmp --outSAMtype BAM Unsorted --outSAMmode NoQS --outSAMattributes NH MD --chimOutType Junctions --chimOutJunctionFormat 1 --chimSegmentReadGapMax 3 --chimJunctionOverhangMin 12 --chimSegmentMin 12 > star.log 2>&1
 
@@ -30,4 +29,4 @@ samtools sort -T ./samtools_temp -@ $threads -m 64M -o $sorted_bam $sout > stool
 samtools index -@ $threads $sorted_bam >> stools.log 2>&1
 
 #get coverage summaries
-#bamcount $sorted_bam --threads $threads --coverage --no-head --require-mdz --min-unique-qual $min_uniq_qual --frag-dist bc --bigwig bc --annotation $annotation bc --auc bc --lats bc > bc.log 2>&1 
+bamcount $sorted_bam --threads $threads --coverage --no-head --require-mdz --min-unique-qual $min_uniq_qual --frag-dist bc --bigwig bc --annotation $annotation bc --auc bc --alts bc > bc.log 2>&1 
