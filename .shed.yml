@@ -1,0 +1,10 @@
+categories:
+    - RNA
+description: Monorail is a RNA-seq analysis which produces coverage & junction summaries
+long_description: |
+    Monorail is a RNA-seq analysis pipeline which produces summarized coverage and junction information w/o the cost of keeping BAMs.
+    It runs STAR, samtools, and bamcount at its core to produce its results efficiently.
+name: monorail
+owner: ChristopherWilks
+remote_repository_url: https://github.com/ChristopherWilks/monorail_galaxy
+type: unrestricted
