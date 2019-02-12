@@ -1,0 +1,120 @@
+<tool id="monorail" name="Run the Monorail RNA-seq analysis pipeline" version="0.1.0">
+    <requirements>
+        <requirement type="package" version="1.9">samtools</requirement>
+        <requirement type="package" version="2.6.0b">star</requirement>
+        <!-- <requirement type="package" version="5.4.0">snakemake-minimal</requirement> -->
+    </requirements>
+        <!-- /bin/bash -x monorail.slim.sh ../ath10 4 10 ../ath10/gtf/exons.bed ./tmp2 ../fastqs/SRR8505407_1_100.fastq.gz ../fastqs/SRR8505407_2_100.fastq.gz -->
+     <command detect_errors="aggressive"><![CDATA[
+                /bin/bash -x "$__tool_directory__/monorail.sh"
+                    $refGenomeSource.GTFconditional.genomeDir.fields.path
+                    \${GALAXY_SLOTS:-4}
+                    $min_uniq_qual
+                    $exons
+                    ./
+                    #if str($singlePaired.sPaired) == "paired_collection"
+                        '$singlePaired.input.forward' '$singlePaired.input.reverse'
+                    #else
+                        '$singlePaired.input1'
+                        #if str($singlePaired.sPaired) == "paired"
+                            '$singlePaired.input2'
+                        #end if
+                    #end if
+    ]]></command>
+        <inputs>
+ <!-- FASTQ input(s) and options specifically for paired-end data. -->
+        <conditional name="singlePaired">
+            <param name="sPaired" type="select" label="Single-end or paired-end reads">
+                <option value="single" selected="true">Single-end</option>
+                <option value="paired">Paired-end (as individual datasets)</option>
+                <option value="paired_collection">Paired-end (as collection)</option>
+            </param>
+            <when value="single">
+                <param format="fastq,fastq.gz" name="input1" type="data" label="RNA-Seq FASTQ file"/>
+            </when>
+            <when value="paired">
+                <param format="fastq,fastq.gz" name="input1" type="data" label="RNA-Seq FASTQ file, forward reads"/>
+                <param format="fastq,fastq.gz" name="input2" type="data" label="RNA-Seq FASTQ file, reverse reads"/>
+            </when>
+            <when value="paired_collection">
+                <param format="fastq,fastq.gz" name="input" type="data_collection" collection_type="paired" label="RNA-Seq FASTQ paired reads"/>
+            </when>
+        </conditional>
+       
+        <!-- 
+        <param name="refGenomeSource" type="select" label="Select reference genome" help="If your genome of interest is not listed, contact the Galaxy team">
+                            <options from_data_table="rnastar_index2">
+                                <filter type="static_value" column="4" value="0"/>
+                                <filter type="sort_by" column="2" />
+                                <validator type="no_options" message="No indexes are available for the selected input dataset"/>
+                            </options>
+        </param>
+        -->
+
+ <!-- Genome source. -->
+        <conditional name="refGenomeSource">
+            <param name="geneSource" type="select" label="Custom or built-in reference genome" help="Built-ins were indexed using default options">
+                <option value="indexed" selected="True">Use a built-in index</option>
+                <option value="history">Use reference genome from history and create temporary index</option>
+            </param>
+            <when value="indexed">
+                <conditional name="GTFconditional">
+                    <param name="GTFselect" type="select" label="Reference genome with or without an annotation" help="Must the index have been created WITH a GTF file (if not you can specify one afterward).">
+                        <option value="without-gtf">use genome reference without builtin gene-model</option>
+                        <option value="with-gtf">use genome reference with builtin gene-model</option>
+                    </param>
+                    <when value="with-gtf">
+                        <param name="genomeDir" argument="--genomeDir" type="select" label="Select reference genome" help="If your genome of interest is not listed, contact the Galaxy team">
+                            <options from_data_table="rnastar_index2">
+                                <filter type="static_value" column="4" value="1"/>
+                                <filter type="sort_by" column="2" />
+                                <validator type="no_options" message="No indexes are available for the selected input dataset"/>
+                            </options>
+                        </param>
+                    </when>
+                    <when value="without-gtf">
+                        <param name="genomeDir" argument="--genomeDir" type="select" label="Select reference genome" help="If your genome of interest is not listed, contact the Galaxy team">
+                            <options from_data_table="rnastar_index2">
+                                <filter type="static_value" column="4" value="0"/>
+                                <filter type="sort_by" column="2" />
+                                <validator type="no_options" message="No indexes are available for the selected input dataset"/>
+                            </options>
+                        </param>
+                    </when>
+                </conditional>
+            </when>
+            <when value="history">
+                <param argument="--genomeFastaFiles" type="data" format="fasta" label="Select a reference genome" />
+            </when>
+        </conditional>
+
+        <param name="exons" type="data" format="bed" label="Exon annotation BED file" help="Upload/use a BED formatted list of exon intervals for quantifying"/>
+        <!-- <param name="exon_annotation" type="select" label="Select an exon annotation BED file" help="If your exon annotation is not listed, contact the Galaxy team">
+                            <options from_data_table="exon_annotations">
+                                <filter type="static_value" column="4" value="0"/>
+                                <filter type="sort_by" column="2" />
+                                <validator type="no_options" message="No indexes are available for the selected input dataset"/>
+                            </options>
+        </param> -->
+        <param name="min_uniq_qual" type="integer" value="10" label="Minimum mapping quality for unique alignments" help="Set this to an appropriate integer value to filter out non-unique alignments"/>
+        </inputs>
+    
+
+        <!--    <expand macro="dbKeyActions" /> -->
+<outputs>
+        <data format="txt" name="output_log" label="${tool.name} on ${on_string}: log" from_work_dir="Log.final.out">
+        </data>
+        <data format="interval" name="chimeric_junctions" label="${tool.name} on ${on_string}: chimeric junctions" from_work_dir="Chimeric.out.junction">
+        </data>
+
+        <data format="interval" name="splice_junctions" label="${tool.name} on ${on_string}: splice junctions.bed" from_work_dir="SJ.out.tab">
+        </data>
+        <data name="mapped_reads" format="bam" label="${tool.name} on ${on_string}: mapped.bam" from_work_dir="sorted.bam">
+        </data>
+        <data name="mapped_reads_index" format="bai" label="${tool.name} on ${on_string}: mapped.bam.bai" from_work_dir="sorted.bam.bai">
+        </data>
+    </outputs>
+    <help>
+        Run the Monorail RNA-seq analysis pipeline
+    </help>
+</tool>
