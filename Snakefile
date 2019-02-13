@@ -80,6 +80,8 @@ def get_accessions(wildcards):
         (run_acc, study_acc, genome, method) = prep_for_galaxy_run()
         for ext in FILES:
             yield os.path.join(config['output'], '%s_%s_%s_%s.%s' % (run_acc, study_acc, genome, method, ext))
+        #here to get the make_galaxy_links rule to fire
+        yield os.path.join(config['output'], '%s_%s_%s_%s.done' % (run_acc, study_acc, genome, method))
     #not running under galaxy, takes a list of accessions
     else:
         for fn in config['input'].split():
@@ -101,6 +103,7 @@ rule all:
     input:
         get_accessions
 
+
 rule make_manifest:
     input:
         config['output'] + '/{quad}.sjout.zst',
@@ -118,6 +121,34 @@ rule make_manifest:
         with open(output[0], 'wt') as fh:
             for fn in FILES:
                 fh.write(params.quad + "." + fn + '\n')
+
+def galaxy_link_files(op):
+    a = [op + '/' + f for f in FILES]
+    a.extend([op + '/align.log', op + '/bamcount.log'])
+    return a
+
+rule make_galaxy_links:
+    input: 
+        config['output'] + '/{quad}.sjout.zst',
+        config['output'] + '/{quad}.bamcount_nonref.csv.zst',
+        config['output'] + '/{quad}.bamcount_auc.tsv',
+        config['output'] + '/{quad}.bamcount_frag.tsv',
+        config['output'] + '/{quad}.Chimeric.out.junction.zst',
+        config['output'] + '/{quad}.all.exon_bw_count.zst',
+        config['output'] + '/{quad}.unique.exon_bw_count.zst',
+        config['output'] + '/{quad}.manifest'
+    output:
+        config['output'] + '/{quad}.done'
+    params:
+        quad=lambda wildcards: wildcards.quad,
+        out=galaxy_link_files(config['output'])
+    run:
+        inputs = input.extend([config['output'] + '/' + params.quad + '.align.log', 
+                               config['output'] + '/' + params.quad + '.bamcount.log'])
+        for (i,fn) in enumerate(input):
+            os.symlink(os.path.abspath(fn), params.out[i])
+        os.symlink(os.path.abspath(input[-3]), output[0])
+
 
 rule bamcount:
     input:
@@ -269,7 +300,7 @@ rule align:
     params:
         index_base=lambda wildcards: '%s/%s/star_idx' % (config['ref'], wildcards.quad.split('_')[2]),
         srr=lambda wildcards: wildcards.quad.split('_')[0],
-        star_params="%s %s" % (config.get('star', ''), '--genomeLoad LoadAndRemove' if 'inputs' not in config else '') 
+        star_params="%s %s" % (config.get('star', ''), '--genomeLoad LoadAndRemove' if 'inputs' not in config else '')
     threads: 16
     shell:
         """
