@@ -14,9 +14,62 @@ FILES = ['sjout.zst',
          'all.exon_bw_count.zst', 'unique.exon_bw_count.zst',
          'manifest']
 
+import subprocess
+def run_command(cmd_args):
+    cmd_args = ' '.join(cmd_args)
+    try:
+        subprocess.check_call(args=cmd_args, shell=True) 
+    except subprocess.CalledProcessError as cpe:
+        sys.stderr.write("error in run_command for command: %s\n" % cmd_args)
+        raise cpe
+
+
 import re
 FASTQ_PATT=re.compile(r'([^_\.]+)_(\d+)\.((fastq)|fq)(\.gz)?$')
 import os
+def prep_for_galaxy_run():
+    try:
+        os.mkdir(config['temp'])
+    except OSError as ose:
+        pass
+    fastqs = config['inputs'].split(',')
+    m = FASTQ_PATT.search(fastqs[0])
+    run_acc = m.group(1)
+    study_acc = run_acc
+    if 'study' in config:
+        study_acc = config['study']
+    genome = 'hg38'
+    if 'genome' in config:
+        genome = config['genome']
+    method = 'sra'
+    # SRR,SRP,genome
+    # e.g. SRR1557855,SRP045778,ce10
+    #create links which will be used in the align step
+    i = 1
+    for f in fastqs:
+        newf = '%s/%s_%s_%s_%s_%d.fastq' % (config['temp'], run_acc, study_acc, genome, method, i)
+        run_command(['zcat',f,'>',newf])
+        #create fastq 0
+        if i == 1:
+            try:
+                os.symlink(os.path.abspath(newf), '%s/%s_%s_%s_%s_%d.fastq' % (config['temp'], run_acc, study_acc, genome, method, 0))
+            except FileExistsError as fee:
+                pass
+        i += 1
+    #create fastq 2 if not paired
+    if i == 2:
+        open('%s/%s_%s_%s_%s_%d.fastq' % (config['temp'], run_acc, study_acc, genome, method, 2), "w").close() 
+    #create expected file structure for annotated exon bed file & reference index
+    ref = config['ref']
+    config['ref'] = '.'
+    os.makedirs('%s/%s' % (config['ref'], genome))
+    os.symlink(ref, '%s/%s/star_idx' % (config['ref'], genome))
+    os.makedirs('%s/%s/gtf' % (config['ref'], genome))
+    os.symlink(config['exon_bed'], 'exons.tmp')
+    os.symlink('../../exons.tmp', '%s/%s/gtf/%s' % (config['ref'], genome, config.get('bw_bed', 'exons.bed')))
+    return([run_acc, study_acc, genome, method])
+
+
 def get_accessions(wildcards):
     """
     Grouping of SRRs with the same SRP could happen here
@@ -24,34 +77,7 @@ def get_accessions(wildcards):
     #if running under galaxy where the user will input the 
     #FASTQs, study, and genome directly
     if 'inputs' in config:
-        fastqs = config['inputs'].split(',')
-        m = FASTQ_PATT.search(fastqs[0])
-        run_acc = m.group(1)
-        study_acc = run_acc
-        if 'study' in config:
-            study_acc = config['study']
-        genome = 'hg38'
-        if 'genome' in config:
-            genome = config['genome']
-        method = 'sra'
-        # SRR,SRP,genome
-        # e.g. SRR1557855,SRP045778,ce10
-        #create links which will be used in the align step
-        i = 1
-        for f in fastqs:
-            try:
-                os.symlink(f,'%s_%s_%s_%s_%d.fastq.gz' % (run_acc, study_acc, genome, method, i))
-            except FileExistsError as fee:
-                pass
-            i += 1
-        #create fastq 2 if not paired
-        if i == 2:
-            open('%s_%s_%s_%s_%d.fastq.gz' % (run_acc, study_acc, genome, method, 2), "w").close() 
-        #create fastq 0
-        try:
-            os.symlink(fastqs[0], '%s_%s_%s_%s_%d.fastq.gz' % (run_acc, study_acc, genome, method, 0))
-        except FileExistsError as fee:
-            pass
+        (run_acc, study_acc, genome, method) = prep_for_galaxy_run()
         for ext in FILES:
             yield os.path.join(config['output'], '%s_%s_%s_%s.%s' % (run_acc, study_acc, genome, method, ext))
     #not running under galaxy, takes a list of accessions
@@ -225,10 +251,9 @@ rule sort:
 
 rule align:
     input:
-        #reads0=config['temp'] + '/{quad}_0.fastq.gz',
-        reads0='{quad}_0.fastq.gz',
-        reads1='{quad}_1.fastq.gz',
-        reads2='{quad}_2.fastq.gz',
+        reads0=config['temp'] + '/{quad}_0.fastq',
+        reads1=config['temp'] + '/{quad}_1.fastq',
+        reads2=config['temp'] + '/{quad}_2.fastq',
         index1=lambda wildcards: '%s/%s/star_idx/SAindex' % (config['ref'], wildcards.quad.split('_')[2]),
         index2=lambda wildcards: '%s/%s/star_idx/SA' % (config['ref'], wildcards.quad.split('_')[2])
     wildcard_constraints:
@@ -244,7 +269,7 @@ rule align:
     params:
         index_base=lambda wildcards: '%s/%s/star_idx' % (config['ref'], wildcards.quad.split('_')[2]),
         srr=lambda wildcards: wildcards.quad.split('_')[0],
-        star_params=config.get('star', '')
+        star_params="%s %s" % (config.get('star', ''), '--genomeLoad LoadAndRemove' if 'inputs' not in config else '') 
     threads: 16
     shell:
         """
@@ -260,7 +285,6 @@ rule align:
             --runThreadN {threads} \
             --genomeDir {params.index_base} \
             --readFilesIn ${{READ_FILES}} \
-            --readFilesCommand zcat \
             --twopassMode None \
             --outTmpDir ${{TMP}} \
             --outReadsUnmapped Fastx \
@@ -330,6 +354,5 @@ rule align:
         size=$(wc -c < Aligned.out.bam)
         echo "COUNT_BAMBytes ${{size}}"
         mv Aligned.out.bam {output.bam}
-        rm {input.reads0} {input.reads1} {input.reads2}
         echo "COUNT_AlignComplete 1"
         """
