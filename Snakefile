@@ -1,18 +1,32 @@
 """
 Parameters:
+- fastq_dump_args: arguments to pass to fastq dumping tool
+- fastq_dump_retries: number of retry attempts before dying
+- fastq_dump_tool: name of tool to run, e.g. 'fastq-dump' or 'fasterq-dump'
 - star: arguments to pass to STAR aligner
+- salmon_args: arguments to pass to salmon quant
 - unique_qual: minimum MAPQ needed to be counted in unique BW [default: 10]
+- bw_bed: name of BED file to use with bwtool
+- max_unalign: maximum number of unaligned reads to save per run accession
 """
 
-STEPS = ['align', 'sort', 'bamcount']
+STEPS = ['download', 'fastq_check', 'align', 'sort',
+         'bamcount',
+         'salmon',
+         'align_unmapped',
+         'extract_jx']
 
-FILES = ['sjout.zst',
+FILES = ['sjout.zst', 'fastq_check.tsv.zst',
+         'unmapped.bam', 'unmapped.fastq.zst',
          'bamcount_nonref.csv.zst',
          'bamcount_auc.tsv',
          'bamcount_frag.tsv',
          'Chimeric.out.junction.zst',
          'all.exon_bw_count.zst', 'unique.exon_bw_count.zst',
-         'manifest']
+         'all.bw.zst', 'unique.bw.zst',
+         'salmon.tsv.zst',
+         'jx_bed.zst',
+         'manifest'] + list(map(lambda x: x + '.log', STEPS))
 
 #get rid of the pesky warnings about current paths
 #and make sure we're not assuming any wrong relative paths
@@ -31,10 +45,26 @@ def run_command(cmd_args):
         sys.stderr.write("error in run_command for command: %s\n" % cmd_args)
         raise cpe
 
-
 import re
+STEPS_FILES_FILTER=re.compile(r'(unmapped)|(download)|(salmon)|(extract_jx)|(jx_bed)|(manifest)')
+def remove_steps_files():
+    #modify STEP and FILES
+    #so we don't run download or unmapped steps
+    global FILES
+    global STEPS
+    for i in reversed(range(0,len(STEPS))):
+        f = STEPS[i]
+        if STEPS_FILES_FILTER.search(f):
+            del(STEPS[i])
+    for i in reversed(range(0,len(FILES))):
+        f = FILES[i]
+        if STEPS_FILES_FILTER.search(f):
+            del(FILES[i])
+
+
 FASTQ_PATT=re.compile(r'([^_\.]+)(_(\d+))?\.((fastq)|fq)(\.gz)?$')
 def prep_for_galaxy_run():
+    remove_steps_files()
     try:
         os.mkdir(config['temp'])
     except OSError as ose:
@@ -70,12 +100,13 @@ def prep_for_galaxy_run():
         open('%s/%s_%s_%s_%s_%d.fastq' % (config['temp'], run_acc, study_acc, genome, method, 2), "w").close() 
     #create expected file structure for annotated exon bed file & reference index
     ref = config['ref']
-    config['ref'] = '.'
+    config['ref'] = os.path.abspath('.')
     os.makedirs('%s/%s' % (config['ref'], genome))
     os.symlink(ref, '%s/%s/star_idx' % (config['ref'], genome))
     os.makedirs('%s/%s/gtf' % (config['ref'], genome))
     os.symlink(config['exon_bed'], 'exons.tmp')
     os.symlink('../../exons.tmp', '%s/%s/gtf/%s' % (config['ref'], genome, config.get('bw_bed', 'exons.bed')))
+    #TODO may need to add additional symlinking for HISAT2 unmapped alignments
     return([run_acc, study_acc, genome, method])
 
 
@@ -112,16 +143,30 @@ rule all:
     input:
         get_accessions
 
-
 rule make_manifest:
     input:
+        config['output'] + '/{quad}.salmon.tsv.zst',
         config['output'] + '/{quad}.sjout.zst',
+        config['output'] + '/{quad}.jx_bed.zst',
         config['output'] + '/{quad}.Chimeric.out.junction.zst',
+        config['output'] + '/{quad}.unmapped.bam',
+        config['output'] + '/{quad}.unmapped.fastq.zst',
         config['output'] + '/{quad}.bamcount_nonref.csv.zst',
         config['output'] + '/{quad}.bamcount_auc.tsv',
         config['output'] + '/{quad}.bamcount_frag.tsv',
+        config['output'] + '/{quad}.fastq_check.tsv.zst',
         config['output'] + '/{quad}.all.exon_bw_count.zst',
         config['output'] + '/{quad}.unique.exon_bw_count.zst',
+        config['output'] + '/{quad}.all.bw.zst',
+        config['output'] + '/{quad}.unique.bw.zst',
+        config['output'] + '/{quad}.align.log',
+        config['output'] + '/{quad}.extract_jx.log',
+        config['output'] + '/{quad}.bamcount.log',
+        config['output'] + '/{quad}.align_unmapped.log',
+        config['output'] + '/{quad}.download.log',
+        config['output'] + '/{quad}.fastq_check.log',
+        config['output'] + '/{quad}.sort.log',
+        config['output'] + '/{quad}.salmon.log'
     output:
         config['output'] + '/{quad}.manifest'
     params:
@@ -132,31 +177,35 @@ rule make_manifest:
                 fh.write(params.quad + "." + fn + '\n')
 
 def galaxy_link_files(op):
+    remove_steps_files()
     a = [op + '/' + f for f in FILES]
-    a.extend([op + '/align.log', op + '/bamcount.log'])
     return a
 
 rule make_galaxy_links:
     input: 
         config['output'] + '/{quad}.sjout.zst',
+        config['output'] + '/{quad}.fastq_check.tsv.zst',
         config['output'] + '/{quad}.bamcount_nonref.csv.zst',
         config['output'] + '/{quad}.bamcount_auc.tsv',
         config['output'] + '/{quad}.bamcount_frag.tsv',
         config['output'] + '/{quad}.Chimeric.out.junction.zst',
         config['output'] + '/{quad}.all.exon_bw_count.zst',
         config['output'] + '/{quad}.unique.exon_bw_count.zst',
-        config['output'] + '/{quad}.manifest'
+        config['output'] + '/{quad}.all.bw.zst',
+        config['output'] + '/{quad}.unique.bw.zst',
+        config['output'] + '/{quad}.fastq_check.log',
+        config['output'] + '/{quad}.align.log',
+        config['output'] + '/{quad}.sort.log',
+        config['output'] + '/{quad}.bamcount.log',
     output:
         config['output'] + '/{quad}.done'
     params:
         quad=lambda wildcards: wildcards.quad,
         out=galaxy_link_files(config['output'])
     run:
-        inputs = input.extend([config['output'] + '/' + params.quad + '.align.log', 
-                               config['output'] + '/' + params.quad + '.bamcount.log'])
         for (i,fn) in enumerate(input):
             os.symlink(os.path.abspath(fn), params.out[i])
-        os.symlink(os.path.abspath(input[-3]), output[0])
+        os.symlink(os.path.abspath(input[-1]), output[0])
 
 
 rule bamcount:
@@ -257,6 +306,19 @@ rule bamcount:
         echo "COUNT_BamcountComplete 1"
         """
 
+rule bw_zstd:
+    input:
+        config['temp'] + '/{prefix}.bw'
+    output:
+        config['output'] + '/{prefix}.bw.zst'
+    shell:
+        """
+        zstd {input} -o {output}
+        size=$(wc -c < {output})
+        echo "COUNT_BwBytes ${{size}}"
+        echo "COUNT_BwZstdComplete 1"
+        """
+
 rule sort:
     input:
         config['temp'] + '/{quad}.bam'
@@ -285,6 +347,163 @@ rule sort:
 
         time samtools index -@ {threads} {output.bam} 2>&1 | tee -a {log}
         echo "COUNT_SortComplete 1"
+        """
+
+rule salmon:
+    input:
+        reads0=config['temp'] + '/{quad}_0.fastq',
+        reads1=config['temp'] + '/{quad}_1.fastq',
+        reads2=config['temp'] + '/{quad}_2.fastq',
+        index1=lambda wildcards: '%s/%s/salmon_index/hash.bin' % (config['ref'], wildcards.quad.split('_')[2]),
+        index2=lambda wildcards: '%s/%s/salmon_index/sa.bin' % (config['ref'], wildcards.quad.split('_')[2])
+    output:
+        config['output'] + '/{quad}.salmon.tsv.zst'
+    log:
+        config['output'] + '/{quad}.salmon.log'
+    params:
+        index_base=lambda wildcards: '%s/%s/salmon_index' % (config['ref'], wildcards.quad.split('_')[2]),
+        salmon_args=config.get('salmon_args', '')
+    threads: 8
+    shell:
+        """
+        READ_FILES="-r {input.reads0}"
+        if [[ -s {input.reads2} ]] ; then
+            READ_FILES="-1 {input.reads1} -2 {input.reads2}"
+        fi
+        if set -o pipefail && time salmon quant \
+            --libType U \
+            --quiet \
+            --validateMappings \
+            -i {params.index_base} \
+            -p {threads} \
+            {params.salmon_args} \
+            ${{READ_FILES}} \
+            --output salmon_quant \
+            --minAssignedFrags 1 \
+            2>&1 | tee -a {log}
+        then
+            echo "COUNT_SalmonSuccess 1"
+
+            time zstd salmon_quant/quant.sf -o {output} 2>&1 | tee -a {log}
+            size=$(wc -c < {output})
+            echo "COUNT_SalmonQuantBytes ${{size}}"
+        else
+            touch {output}
+            echo "COUNT_SalmonFailure 1"
+        fi
+                
+        rm -rf salmon_quant
+        echo "COUNT_SalmonComplete 1"
+        """
+
+rule align_unmapped:
+    input:
+        unmapped1=config['temp'] + '/{quad}_1.unmappedfastq',
+        unmapped2=config['temp'] + '/{quad}_2.unmappedfastq',
+        index=lambda wildcards: '%s/%s/unmapped_hisat2_idx/genome.1.ht2' % (config['ref'], wildcards.quad.split('_')[2])
+    output:
+        bam=config['output'] + '/{quad}.unmapped.bam',
+        sample=config['output'] + '/{quad}.unmapped.fastq.zst'
+    log:
+        config['output'] + '/{quad}.align_unmapped.log'
+    params:
+        index_base=lambda wildcards: '%s/%s/unmapped_hisat2_idx/genome' % (config['ref'], wildcards.quad.split('_')[2]),
+        srr=lambda wildcards: wildcards.quad.split('_')[0],
+        hisat2_params=config.get('hisat2', ''),
+        max_unalign=config.get('max_unalign', 100000)
+    threads: 16
+    shell:
+        """
+        TMP="{config[temp]}/align_unmapped_temp.{params.srr}"
+        READ_FILES="-1 {input.unmapped1} -2 {input.unmapped2}"
+        if [[ ! -s {input.unmapped2} ]] ; then
+            READ_FILES="-U {input.unmapped1}"
+        fi
+        time hisat2 \
+            $READ_FILES \
+            -t --mm \
+            -x {params.index_base} \
+            --threads {threads} \
+            {params.hisat2_params} \
+            --un ${{TMP}}.un \
+            --un-conc ${{TMP}}.un_conc \
+            -S ${{TMP}}.sam \
+            2>&1 | tee -a {log}
+
+        #
+        # Make BAM file out of aligned reads
+        #
+        time samtools view \
+            -b -F 4 \
+            -o {output.bam} \
+            ${{TMP}}.sam \
+            2>&1 | tee -a {log}
+        rm -f ${{TMP}}.sam
+
+        #
+        # Save a subset of the doubly unaligned reads
+        #
+        if [[ ! -s {input.unmapped2} ]] ; then
+            # unpaired
+            fastq-sample \
+                -n {params.max_unalign} \
+                -o ${{TMP}}.samp \
+                ${{TMP}}.un
+            rm -f ${{TMP}}.un
+        else
+            # paired-end
+            fastq-sample \
+                -n {params.max_unalign} \
+                -o ${{TMP}}.samp \
+                ${{TMP}}.1.un_conc ${{TMP}}.2.un_conc
+            rm -f ${{TMP}}.1.un_conc ${{TMP}}.2.un_conc
+            
+            # interleave the two output fastqs into single file
+            paste ${{TMP}}.samp.1.fastq ${{TMP}}.samp.2.fastq \
+                | paste - - - - \
+                | awk -v OFS="\n" -v FS="\t" '{{print($1,$3,$5,$7,$2,$4,$6,$8)}}' \
+                > ${{TMP}}.samp.fastq
+            rm -f ${{TMP}}.samp.1.fastq ${{TMP}}.samp.2.fastq
+        fi
+
+        test -f ${{TMP}}.samp.fastq
+        time zstd ${{TMP}}.samp.fastq -o {output.sample} 2>&1 | tee -a {log}
+        size=$(wc -c < {output.sample})
+        echo "COUNT_UnmappedSampleBytes ${{size}}"
+        rm -f ${{TMP}}.samp.fastq
+    
+        size=$(wc -c < {output.bam})
+        echo "COUNT_UnmappedBamBytes ${{size}}"
+
+        echo "COUNT_AlignUnmappedComplete 1"
+        """
+
+rule extract_jx:
+    input:
+        bam=config['temp'] + '/{quad}-sorted.bam',
+        bamidx=config['temp'] + '/{quad}-sorted.bam.bai',
+        fa=lambda wildcards: '%s/%s/fasta/genome.fa' % (config['ref'], wildcards.quad.split('_')[2]),
+        gtf=lambda wildcards: '%s/%s/gtf/genes.gtf' % (config['ref'], wildcards.quad.split('_')[2])
+    output:
+        config['output'] + '/{quad}.jx_bed.zst'
+    params:
+        srr=lambda wildcards: wildcards.quad.split('_')[0]
+    log:
+        config['output'] + '/{quad}.extract_jx.log'
+    shell:
+        """
+        TMP="{config[temp]}/extract_jx.{params.srr}"
+        time regtools junctions extract \
+            -i 20 -a 1 \
+            -o ${{TMP}}.jx_tmp \
+            {input.bam} 2>&1 | tee -a {log}
+        time zstd ${{TMP}}.jx_tmp -o {output} 2>&1 | tee -a {log}
+        rm -f ${{TMP}}.jx_tmp
+
+        size=$(wc -c < {output})
+        echo "COUNT_ExtractJxBytes ${{size}}"
+
+        echo "COUNT_ExtractJxComplete 1"
         """
 
 rule align:
@@ -392,5 +611,173 @@ rule align:
         size=$(wc -c < Aligned.out.bam)
         echo "COUNT_BAMBytes ${{size}}"
         mv Aligned.out.bam {output.bam}
+
         echo "COUNT_AlignComplete 1"
+        """
+
+rule fastq_check:
+    input:
+        reads0=config['temp'] + '/{quad}_0.fastq',
+        reads1=config['temp'] + '/{quad}_1.fastq',
+        reads2=config['temp'] + '/{quad}_2.fastq'
+    output:
+        config['output'] + '/{quad}.fastq_check.tsv.zst'
+    log:
+        config['output'] + '/{quad}.fastq_check.log'
+    params:
+        srr=lambda wildcards: wildcards.quad.split('_')[0]
+    shell:
+        """
+        TMP="{config[temp]}/fastq_check-{params.srr}.tsv"
+        touch ${{TMP}}
+        if [[ -s {input.reads0} ]] ; then
+            time seqtk fqchk -q0 {input.reads0} >>${{TMP}} 2>>{log}
+        fi
+        if [[ -s {input.reads1} ]] ; then
+            time seqtk fqchk -q0 {input.reads1} >>${{TMP}} 2>>{log}
+        fi
+        if [[ -s {input.reads2} ]] ; then
+            time seqtk fqchk -q0 {input.reads2} >>${{TMP}} 2>>{log}
+        fi
+        time zstd ${{TMP}} -o {output} 2>&1 | tee -a {log}
+        size=$(wc -c < {output})
+        echo "COUNT_FastqCheckBytes ${{size}}"
+
+        echo "COUNT_FastqCheckComplete 1"
+        """
+
+rule download:
+    output:
+        temp(config['temp'] + '/{quad}_0.fastq'),
+        temp(config['temp'] + '/{quad}_1.fastq'),
+        temp(config['temp'] + '/{quad}_2.fastq')
+    log:
+        config['output'] + '/{quad}.download.log'
+    params:
+        srr=lambda wildcards: wildcards.quad.split('_')[0],
+        method=lambda wildcards: wildcards.quad.split('_')[3],
+        fd_params=config.get('fastq_dump_args', ''),
+        retries=config.get('fastq_dump_retries', '5')
+    threads: 4
+    shell:
+        """
+                set -x
+        SUCCESS=0
+        TIMEOUT=10
+        PARAMS=""
+        TMP="{config[temp]}/dl-{params.srr}"
+        ! test -d ${{TMP}}
+        
+        if [[ {params.method} == "sra" ]] ; then
+            USE_FASTERQ=1
+            for i in {{ 1..{params.retries} }} ; do
+                if time prefetch -t fasp -O ${{TMP}} -L info {params.srr} 2>&1 >> {log} ; then
+                    SUCCESS=1
+                    break
+                else
+                    echo "COUNT_SraRetries 1"
+                    TIMEOUT=$((${{TIMEOUT}} * 2))
+                    sleep ${{TIMEOUT}}
+                fi
+            done
+            if (( $SUCCESS == 0 )) ; then
+                echo "COUNT_SraFailures 1"
+                exit 1
+            fi
+            test -f ${{TMP}}/*.sra
+            size=$(cat ${{TMP}}/*.sra | wc -c)
+            echo "COUNT_SraBytesDownloaded ${{size}}"
+            if (( ${{USE_FASTERQ}} == 1 )) ; then
+                time fasterq-dump ${{TMP}}/*.sra \
+                    -e {threads} \
+                    -t ${{TMP}} \
+                    -L info \
+                    --split-files \
+                    --skip-technical \
+                    -o {params.srr}.fastq \
+                    2>&1 >> {log}
+                test -f {params.srr}_2.fastq || mv {params.srr}.fastq {params.srr}_0.fastq
+            else
+                time fastq-dump ${{TMP}}/*.sra \
+                    -L info \
+                    --split-files \
+                    --skip-technical \
+                    -O . \
+                    2>&1 >> {log}
+                test -f {params.srr}_2.fastq || mv {params.srr}_1.fastq {params.srr}_0.fastq
+            fi
+            rm -rf ${{TMP}}
+        elif [[ {params.method} == "gdc" ]] ; then
+            TOKEN=~/gdc/latest.txt
+            if [[ ! -f ${{TOKEN}} ]] ; then
+                echo "ERROR: no GDC token file found at ${{TOKEN}}"
+                exit 1
+            fi
+            for i in {{ 1..{params.retries} }} ; do
+                if time gdc-client download \
+                    -t ${{TOKEN}} \
+                    --log-file {{TMP}}/log.txt \
+                    -d {{TEMP}} \
+                    {params.srr} 2>&1 >> {log}
+                then
+                    SUCCESS=1
+                    break
+                else
+                    echo "COUNT_GdcRetries 1"
+                    TIMEOUT=$((${{TIMEOUT}} * 2))
+                    sleep ${{TIMEOUT}}
+                fi
+            done
+            if (( $SUCCESS == 0 )) ; then
+                echo "COUNT_GdcFailures 1"
+                exit 1
+            fi
+            test -d {{TEMP}}/{params.srr}
+            test -f {{TEMP}}/{params.srr}/*.tar.gz
+            
+            echo "=== gdc-client log.txt begin ===" >> {log}
+            cat {{TMP}}/log.txt >> {log}
+            echo "=== gdc-client log.txt end===" >> {log}
+            
+            size=$(cat {{TEMP}}/{params.srr}/*.tar.gz | wc -c)
+            echo "COUNT_GdcBytesDownloaded ${{size}}"
+
+            tar zxvf {{TEMP}}/{params.srr}/*.tar.gz
+            rm -rf {{TEMP}}
+            
+            num_1s=$(ls -1 *_1.fastq | wc -l)
+            num_2s=$(ls -1 *_2.fastq | wc -l)
+            if (( ${{num_1s}} == 0 )) ; then
+                echo "ERROR: No _1.fastq files output"
+                exit 1
+            fi
+            if (( ${{num_1s}} > 1 )) ; then
+                echo "ERROR: More than one _1.fastq file found"
+                exit 1
+            fi
+            if (( ${{num_2s}} == 0 )) ; then
+                # unpaired
+                mv *_1.fastq {params.srr}_0.fastq
+            else
+                # paired-end
+                mv *_1.fastq {params.srr}_1.fastq
+                mv *_2.fastq {params.srr}_2.fastq
+            fi
+        fi
+        
+        # Next chunk expects the FASTQ files to exist in the current directory
+        # named {{params.srr}}_{{0,1,2}}.fastq
+        size=0
+        for i in {{0..2}} ; do
+            fn={params.srr}_${{i}}.fastq
+            if [[ -f ${{fn}} ]] ; then
+                echo "COUNT_FilesDownloaded 1"
+            else
+                touch ${{fn}}
+            fi
+            size=$((${{size}} + $(wc -c < ${{fn}})))
+            mv ${{fn}} {config[temp]}/{wildcards.quad}_${{i}}.fastq
+        done
+        echo "COUNT_BytesDownloaded ${{size}}"
+        echo "COUNT_DownloadComplete 1"
         """
