@@ -14,6 +14,14 @@ FILES = ['sjout.zst',
          'all.exon_bw_count.zst', 'unique.exon_bw_count.zst',
          'manifest']
 
+#get rid of the pesky warnings about current paths
+#and make sure we're not assuming any wrong relative paths
+import os
+config['output']=os.path.abspath(config['output'])
+config['temp']=os.path.abspath(config['temp'])
+config['exon_bed']=os.path.abspath(config['exon_bed'])
+config['ref']=os.path.abspath(config['ref'])
+
 import subprocess
 def run_command(cmd_args):
     cmd_args = ' '.join(cmd_args)
@@ -25,8 +33,7 @@ def run_command(cmd_args):
 
 
 import re
-FASTQ_PATT=re.compile(r'([^_\.]+)_(\d+)\.((fastq)|fq)(\.gz)?$')
-import os
+FASTQ_PATT=re.compile(r'([^_\.]+)(_(\d+))?\.((fastq)|fq)(\.gz)?$')
 def prep_for_galaxy_run():
     try:
         os.mkdir(config['temp'])
@@ -34,8 +41,10 @@ def prep_for_galaxy_run():
         pass
     fastqs = config['inputs'].split(',')
     m = FASTQ_PATT.search(fastqs[0])
-    run_acc = m.group(1)
-    study_acc = run_acc
+    run_acc = 'sample'
+    if m is not None:
+        run_acc = m.group(1)
+    study_acc = 'study'
     if 'study' in config:
         study_acc = config['study']
     genome = 'hg38'
@@ -154,8 +163,6 @@ rule bamcount:
     input:
         bam=config['temp'] + '/{quad}-sorted.bam',
         bamidx=config['temp'] + '/{quad}-sorted.bam.bai',
-        #exe='/bamcount/bamcount',
-        exe='bamcount',
         bed=lambda wildcards: '%s/%s/gtf/%s' % (config['ref'], wildcards.quad.split('_')[2], config.get('bw_bed', 'exons.bed'))
     output:
         nonref=config['output'] + '/{quad}.bamcount_nonref.csv.zst',
@@ -174,7 +181,7 @@ rule bamcount:
     shell:
         """
         TMP={config[temp]}/{params.srr}_bamcount
-        {input.exe} {input.bam} \
+        bamcount {input.bam} \
             --threads {threads} \
             --coverage \
             --no-head \

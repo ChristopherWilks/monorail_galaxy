@@ -3,23 +3,28 @@
         <requirement type="package" version="1.9">samtools</requirement>
         <requirement type="package" version="2.6.0b">star</requirement>
         <requirement type="package" version="0.2.6">bamcount</requirement>
+        <requirement type="package" version="5.4.0">snakemake</requirement>
+        <requirement type="package" version="1.3.8">zstd</requirement>
     </requirements>
         <!-- /bin/bash -x monorail.slim.sh ../ath10 4 10 ../ath10/gtf/exons.bed ./tmp2 ../fastqs/SRR8505407_1_100.fastq.gz ../fastqs/SRR8505407_2_100.fastq.gz -->
-     <command detect_errors="aggressive"><![CDATA[
-                /bin/bash -x "$__tool_directory__/monorail.sh"
-                    $refGenomeSource.GTFconditional.genomeDir.fields.path
-                    \${GALAXY_SLOTS:-4}
-                    $min_uniq_qual
-                    $exons
-                    ./
+        <command detect_errors="aggressive"><![CDATA[
+            snakemake --snakefile "$__tool_directory__/Snakefile"
+            -j \${GALAXY_SLOTS:-4} 
+            --config 
                     #if str($singlePaired.sPaired) == "paired_collection"
-                        '$singlePaired.input.forward' '$singlePaired.input.reverse'
+                        inputs="$singlePaired.input.forward,$singlePaired.input.reverse"
                     #else
-                        '$singlePaired.input1'
+                        inputs="$singlePaired.input1"
                         #if str($singlePaired.sPaired) == "paired"
-                            '$singlePaired.input2'
+                            inputs="$singlePaired.input1,$singlePaired.input2"
                         #end if
                     #end if
+                    output="."
+                    temp="./tmp"
+                    ref="$refGenomeSource.GTFconditional.genomeDir.fields.path"
+                    genome="ath10"
+                    exon_bed="$exons"
+                    study="SRP182756"
     ]]></command>
         <inputs>
  <!-- FASTQ input(s) and options specifically for paired-end data. -->
@@ -91,10 +96,11 @@
         <param name="min_uniq_qual" type="integer" value="10" label="Minimum mapping quality for unique alignments" help="Set this to an appropriate integer value to filter out non-unique alignments"/>
         </inputs>
     <outputs>
+        <data format="txt" name="auc" label="${tool.name} on ${on_string}: AUC" from_work_dir="bamcount_auc.tsv"/>
+        <!-- 
         <data format="txt" name="output_log" label="${tool.name} on ${on_string}: log" from_work_dir="Log.final.out"/>
         <data format="txt" name="auc" label="${tool.name} on ${on_string}: AUC" from_work_dir="bc.auc.tsv"/>
         <data format="txt" name="bc_log" label="${tool.name} on ${on_string}: bamcount log" from_work_dir="bc.log"/>
-        <!-- 
         <data format="interval" name="chimeric_junctions" label="${tool.name} on ${on_string}: chimeric junctions" from_work_dir="Chimeric.out.junction"/>
         <data format="interval" name="splice_junctions" label="${tool.name} on ${on_string}: splice junctions.bed" from_work_dir="SJ.out.tab"/>
         <data name="mapped_reads" format="bam" label="${tool.name} on ${on_string}: mapped.bam" from_work_dir="sorted.bam"/>
