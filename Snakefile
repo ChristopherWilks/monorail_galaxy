@@ -57,13 +57,13 @@ def prep_for_galaxy_run():
     i = 1
     for f in fastqs:
         newf = '%s/%s_%s_%s_%s_%d.fastq' % (config['temp'], run_acc, study_acc, genome, method, i)
-        run_command(['zcat',f,'>',newf])
+        if 'compressed' in config:
+            run_command(['zcat',f,'>',newf])
+        else:
+            os.symlink(os.path.abspath(f), newf)
         #create fastq 0
         if i == 1:
-            try:
-                os.symlink(os.path.abspath(newf), '%s/%s_%s_%s_%s_%d.fastq' % (config['temp'], run_acc, study_acc, genome, method, 0))
-            except FileExistsError as fee:
-                pass
+            os.symlink(os.path.abspath(newf), '%s/%s_%s_%s_%s_%d.fastq' % (config['temp'], run_acc, study_acc, genome, method, 0))
         i += 1
     #create fastq 2 if not paired
     if i == 2:

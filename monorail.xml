@@ -1,4 +1,5 @@
 <tool id="monorail" name="Run the Monorail RNA-seq analysis pipeline" version="0.1.0">
+    <!-- much of this was based on https://github.com/galaxyproject/tools-iuc/blob/master/tools/rgrnastar/rg_rnaStar.xml -->
     <requirements>
         <requirement type="package" version="1.9">samtools</requirement>
         <requirement type="package" version="2.6.0b">star</requirement>
@@ -13,18 +14,22 @@
             --config 
                     #if str($singlePaired.sPaired) == "paired_collection"
                         inputs="$singlePaired.input.forward,$singlePaired.input.reverse"
+                        #if $singlePaired.input.forward.is_of_type("fastq.gz"):
+                            compressed=1
+                        #end if
                     #else
                         inputs="$singlePaired.input1"
                         #if str($singlePaired.sPaired) == "paired"
                             inputs="$singlePaired.input1,$singlePaired.input2"
                         #end if
+                        #if $singlePaired.input1.is_of_type("fastq.gz"):
+                            compressed=1
+                        #end if
                     #end if
+                    ref="$refGenomeSource.GTFconditional.genomeDir.fields.path"
+                    exon_bed="$exons"
                     output="."
                     temp="./tmp"
-                    ref="$refGenomeSource.GTFconditional.genomeDir.fields.path"
-                    genome="ath10"
-                    exon_bed="$exons"
-                    study="SRP182756"
     ]]></command>
         <inputs>
  <!-- FASTQ input(s) and options specifically for paired-end data. -->
@@ -93,7 +98,6 @@
             </when>
         </conditional>
         <param name="exons" type="data" format="bed" label="Exon annotation BED file" help="Upload/use a BED formatted list of exon intervals for quantifying"/>
-        <param name="min_uniq_qual" type="integer" value="10" label="Minimum mapping quality for unique alignments" help="Set this to an appropriate integer value to filter out non-unique alignments"/>
         </inputs>
     <outputs>
         <data format="txt" name="auc" label="${tool.name} on ${on_string}: AUC" from_work_dir="bamcount_auc.tsv"/>
