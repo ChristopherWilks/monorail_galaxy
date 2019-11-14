@@ -98,15 +98,6 @@ def prep_for_galaxy_run():
     #create fastq 2 if not paired
     if i == 2:
         open('%s/%s_%s_%s_%s_%d.fastq' % (config['temp'], run_acc, study_acc, genome, method, 2), "w").close() 
-    #create expected file structure for annotated exon bed file & reference index
-    ref = config['ref']
-    config['ref'] = os.path.abspath('.')
-    os.makedirs('%s/%s' % (config['ref'], genome))
-    os.symlink(ref, '%s/%s/star_idx' % (config['ref'], genome))
-    os.makedirs('%s/%s/gtf' % (config['ref'], genome))
-    os.symlink(config['exon_bed'], 'exons.tmp')
-    os.symlink('../../exons.tmp', '%s/%s/gtf/%s' % (config['ref'], genome, config.get('bw_bed', 'exons.bed')))
-    #TODO may need to add additional symlinking for HISAT2 unmapped alignments
     return([run_acc, study_acc, genome, method])
 
 
