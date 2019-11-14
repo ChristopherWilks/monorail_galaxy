@@ -1,6 +1,6 @@
 <tables>
-    <table name="rnastar_index2" comment_char="#" allow_duplicate_entries="False">
-        <columns>value, dbkey, name, path, with-gtf</columns>
-        <file path="tool-data/rnastar_index2.loc" />
+    <table name="monorail_dummy_index" comment_char="#">
+        <columns>value, dbkey, name, path</columns>
+        <file path="tool-data/monorail_index.loc" />
     </table>
 </tables>
